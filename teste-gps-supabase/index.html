@@ -7,17 +7,27 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     body { font-family: sans-serif; padding: 20px; background: #121212; color: #fff; }
-    button { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    select, button { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; border: none; border-radius: 8px; font-weight: bold; }
+    select { background: #2c2c2c; color: #fff; border: 1px solid #444; }
+    button { cursor: pointer; }
     .btn-start { background: #2e7d32; color: white; }
     .btn-stop { background: #c62828; color: white; display: none; }
     .painel { background: #1e1e1e; padding: 15px; border-radius: 8px; font-family: monospace; line-height: 1.6; }
     .status-ok { color: #4caf50; }
     .status-warn { color: #ff9800; }
+    .badge-schema { background: #1976d2; padding: 2px 8px; border-radius: 4px; font-size: 14px; }
   </style>
 </head>
 <body>
 
   <h2>Rastreador GPS (5s)</h2>
+
+  <!-- Seletor de Ambiente (Schema) -->
+  <select id="seletorSchema">
+    <option value="dev" selected>Modo: Developer (schema: dev)</option>
+    <option value="public">Modo: Produção (schema: public)</option>
+  </select>
+
   <button id="btnStart" class="btn-start" onclick="iniciarRastreamento()">Iniciar Coleta</button>
   <button id="btnStop" class="btn-stop" onclick="pararRastreamento()">Parar Coleta</button>
 
@@ -56,6 +66,7 @@
       }
 
       await ativarWakeLock();
+      document.getElementById('seletorSchema').disabled = true; // Trava o seletor durante a coleta
       document.getElementById('btnStart').style.display = 'none';
       document.getElementById('btnStop').style.display = 'block';
       document.getElementById('log').innerHTML = "Obtendo sinal dos satélites...";
@@ -66,6 +77,9 @@
           if (agora - ultimoEnvio < INTERVALO_MS) return; // Trava de 5s
           ultimoEnvio = agora;
 
+          // Pega qual schema está selecionado na tela ('dev' ou 'public')
+          const schemaAtivo = document.getElementById('seletorSchema').value;
+
           const dados = {
             dispositivo: navigator.userAgent.slice(0, 50),
             lat: pos.coords.latitude,
@@ -74,12 +88,16 @@
             velocidade: pos.coords.speed || 0
           };
 
-          // Envia para o Supabase
-          const { error } = await supabaseClient.from('medicoes_gps').insert([dados]);
+          // Envia para o Supabase apontando para o schema escolhido (.schema(schemaAtivo))
+          const { error } = await supabaseClient
+            .schema(schemaAtivo)
+            .from('medicoes_gps')
+            .insert([dados]);
           
           if (!error) contadorEnvios++;
 
           document.getElementById('log').innerHTML = `
+            <b>Ambiente:</b> <span class="badge-schema">${schemaAtivo}</span><br>
             <b>Status:</b> <span class="${error ? 'status-warn' : 'status-ok'}">${error ? 'Erro Supabase: ' + error.message : 'Gravando no Supabase'}</span><br>
             <b>Tela Acesa (WakeLock):</b> ${wakeLock ? 'Ativo' : 'Inativo'}<br>
             <b>Envios realizados:</b> ${contadorEnvios}<br>
@@ -102,6 +120,7 @@
       if (wakeLock !== null) wakeLock.release();
       watchId = null;
       wakeLock = null;
+      document.getElementById('seletorSchema').disabled = false;
       document.getElementById('btnStart').style.display = 'block';
       document.getElementById('btnStop').style.display = 'none';
       document.getElementById('log').innerHTML += "<br><b>Coleta encerrada.</b>";
