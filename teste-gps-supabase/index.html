@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Teste Rastreador GPS</title>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #121212; color: #fff; }
+    button { width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    .btn-start { background: #2e7d32; color: white; }
+    .btn-stop { background: #c62828; color: white; display: none; }
+    .painel { background: #1e1e1e; padding: 15px; border-radius: 8px; font-family: monospace; line-height: 1.6; }
+    .status-ok { color: #4caf50; }
+    .status-warn { color: #ff9800; }
+  </style>
+</head>
+<body>
+
+  <h2>Rastreador GPS (5s)</h2>
+  <button id="btnStart" class="btn-start" onclick="iniciarRastreamento()">Iniciar Coleta</button>
+  <button id="btnStop" class="btn-stop" onclick="pararRastreamento()">Parar Coleta</button>
+
+  <div class="painel" id="log">
+    Status: Aguardando início...
+  </div>
+
+  <script>
+    // 1. Configuração do Supabase
+    const SUPABASE_URL = 'https://iibzqsubxqcelsrvznhz.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_7xYJUFvPOBvSA8eBxVu3Sg_bSPN_6OG';
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let watchId = null;
+    let wakeLock = null;
+    let ultimoEnvio = 0;
+    let contadorEnvios = 0;
+    const INTERVALO_MS = 5000; // 5 segundos
+
+    // 2. Função para manter a tela do celular acesa (Wake Lock)
+    async function ativarWakeLock() {
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+        } catch (err) {
+          console.warn('Wake Lock falhou:', err.message);
+        }
+      }
+    }
+
+    // 3. Inicia o GPS e os envios
+    async function iniciarRastreamento() {
+      if (!navigator.geolocation) {
+        alert("Geolocalização não suportada no navegador.");
+        return;
+      }
+
+      await ativarWakeLock();
+      document.getElementById('btnStart').style.display = 'none';
+      document.getElementById('btnStop').style.display = 'block';
+      document.getElementById('log').innerHTML = "Obtendo sinal dos satélites...";
+
+      watchId = navigator.geolocation.watchPosition(
+        async (pos) => {
+          const agora = Date.now();
+          if (agora - ultimoEnvio < INTERVALO_MS) return; // Trava de 5s
+          ultimoEnvio = agora;
+
+          const dados = {
+            dispositivo: navigator.userAgent.slice(0, 50),
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            precisao: pos.coords.accuracy,
+            velocidade: pos.coords.speed || 0
+          };
+
+          // Envia para o Supabase
+          const { error } = await supabaseClient.from('medicoes_gps').insert([dados]);
+          
+          if (!error) contadorEnvios++;
+
+          document.getElementById('log').innerHTML = `
+            <b>Status:</b> <span class="${error ? 'status-warn' : 'status-ok'}">${error ? 'Erro Supabase: ' + error.message : 'Gravando no Supabase'}</span><br>
+            <b>Tela Acesa (WakeLock):</b> ${wakeLock ? 'Ativo' : 'Inativo'}<br>
+            <b>Envios realizados:</b> ${contadorEnvios}<br>
+            <b>Lat:</b> ${dados.lat.toFixed(6)}<br>
+            <b>Lon:</b> ${dados.lon.toFixed(6)}<br>
+            <b>Precisão:</b> ±${Math.round(dados.precisao)} metros<br>
+            <b>Horário:</b> ${new Date().toLocaleTimeString()}
+          `;
+        },
+        (erro) => {
+          document.getElementById('log').innerHTML = `Erro GPS: ${erro.message}`;
+        },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      );
+    }
+
+    // 4. Para a coleta
+    function pararRastreamento() {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+      if (wakeLock !== null) wakeLock.release();
+      watchId = null;
+      wakeLock = null;
+      document.getElementById('btnStart').style.display = 'block';
+      document.getElementById('btnStop').style.display = 'none';
+      document.getElementById('log').innerHTML += "<br><b>Coleta encerrada.</b>";
+    }
+  </script>
+</body>
+</html>
